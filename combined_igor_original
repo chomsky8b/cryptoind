@@ -1,0 +1,142 @@
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+import os
+import gradio as gr
+import plotly.express as px
+import threading
+from functools import partial
+import argparse
+
+# Function to calculate dates
+def calc_dates(date=datetime.now()):
+    this_year = date - timedelta(days=date.day-1)
+    one_year = this_year + timedelta(days=-365)
+    return (one_year.strftime("%Y-%m-%d"), this_year.strftime("%Y-%m-%d"))
+
+# Function to calculate Sharpe ratio
+def do_sharpe(ser, days=True):
+    mins_in_year = 60 * 24 * 365
+    days_in_year = 365
+    if days:
+        themean = ser.pct_change().mean() * days_in_year
+        thestd = ser.pct_change().std() * np.sqrt(days_in_year)
+    else:
+        themean = ser.pct_change().mean() * mins_in_year
+        thestd = ser.pct_change().std() * np.sqrt(mins_in_year)
+    sharpe = themean / thestd
+    return themean, thestd, sharpe, format_output(themean, thestd, sharpe)
+
+# Function to format output
+def format_output(mymean, mystandarddeviation, mysharpe):
+    output = f"""
+    | Metric             | Value                |
+    |--------------------|----------------------|
+    | Mean               | {mymean:.2f}         |
+    | Standard Deviation | {mystandarddeviation:.2f} |
+    | Sharpe-Rivin             | {mysharpe:.3f}       |
+    """
+    return output
+
+# Function to fetch crypto data
+def fetch_crypto_data(start_date, end_date, *, locale='global', market_type='crypto'):
+    # Read data from CSV file
+    crypto_data = pd.read_csv("crypto_data.csv")
+    # Filtering based on market type
+    if market_type == 'crypto':
+        crypto_data = crypto_data[crypto_data['ticker'].str.endswith('USD')]
+    elif market_type == 'stocks':
+        crypto_data = crypto_data[~crypto_data['ticker'].isin(etfs)]
+    else:
+        pass
+    crypto_data["totalvol"] = crypto_data.volume * crypto_data.close
+    crypto_data["totalvol2"] = crypto_data.volume / crypto_data.close
+    crypto_data.sort_values(by='timestamp', inplace=True)
+    crypto_data['totalvol_ema'] = crypto_data.groupby('ticker')['totalvol'].transform(lambda x: x.ewm(span=30, adjust=False).mean())
+    crypto_data['totalvol2_ema'] = crypto_data.groupby('ticker')['totalvol2'].transform(lambda x: x.ewm(span=30, adjust=False).mean())
+    return crypto_data
+
+# Function to get crypto index
+def get_crypto_index(crypto_data, howmany=20, func=lambda x: x):
+    valdict = {}
+    dfdict = {}
+    crypto_data.sort_values('timestamp', inplace=True, ascending=True)
+    for d, df in crypto_data.groupby('timestamp'):
+        df = df[df.open > 0.01]
+        df = df.sort_values('totalvol_ema', ascending=False).head(howmany)
+        if 'close' not in df.columns:
+            continue
+        indopen = np.average(df.open.values, weights=df.totalvol_ema)
+        indclose = np.average(df.close.values, weights=df.totalvol_ema)
+        ser = df.totalvol_ema.map(func)
+        valdict[d] = {'open': indopen, 'close': indclose}
+        dfdict[d] = pd.DataFrame({'ticker': df.ticker, 'weight': ser, 'close': df.close})
+    first_key = next(iter(valdict))
+    del valdict[first_key]
+    del dfdict[first_key]
+    vals = pd.DataFrame(valdict).T
+    vals.index = pd.to_datetime(vals.index, unit='ms')
+    vallist = []
+    for key, val in dfdict.items():
+        val['date'] = pd.to_datetime(key, unit='ms')
+        vallist.append(val)
+    dfs = pd.concat(vallist)
+    return vals, dfs
+
+# Function to update weights
+def update_weights(**kwargs):
+    start_date, end_date = calc_dates()
+    crypto_data = fetch_crypto_data(start_date, end_date, **kwargs)
+    _, dfs = get_crypto_index(crypto_data)
+    retval = dfs[dfs.date == dfs.date.max()]
+    retval.to_csv("wts.csv", index=False)
+    return retval
+
+# Function to plot index prices
+def plot_index_prices(start_date, end_date, **kwargs):
+    crypto_data = fetch_crypto_data(start_date=start_date, end_date=end_date, **kwargs)
+    vals, _ = get_crypto_index(crypto_data)
+    _, _, _, output = do_sharpe(vals.close)
+    fig = px.line(vals, x=vals.index, y='close', title='Index Prices')
+    fig.update_xaxes(rangeslider_visible=True)
+    return fig, output
+
+# Function to update weighted prices in real-time
+def realtime_update_weighted_prices():
+    if should_update_weights():
+        threading.Thread(target=update_weights, daemon=True).start()
+    last_day = pd.read_csv("wts.csv", parse_dates=["date"])
+    prices = update_day(last_day)
+    _, _, _, output = do_sharpe(prices, days=False)
+    fig = px.line(prices, x=prices.index, y=prices.values, title='Index Today')
+    return fig, output
+
+# Function to create graph
+def make_graph(choice, start_date=None, end_date=None, **kwargs):
+    if choice == "Historical":
+        fig, stats = plot_index_prices(start_date, end_date, **kwargs)
+    else:
+        fig, stats = realtime_update_weighted_prices()
+    return gr.Plot(fig), gr.Markdown(stats)
+
+# Main function
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--locale", default='global', help="the locale")
+    parser.add_argument("--market_type", default='crypto', help="the market type")
+    args = parser.parse_args()
+    make_graph_flex = partial(make_graph, locale=args.locale, market_type=args.market_type)
+    update_weights(locale=args.locale, market_type=args.market_type)
+    with gr.Blocks() as iface:
+        startdatebox = gr.Textbox(label="Start Date")
+        enddatebox = gr.Textbox(label="End Date")
+        radio = gr.Radio(choices=["Historical", "Real-time"], label="graph type")
+        update_button = gr.Button("Update Graph")
+        theplot = gr.Plot()
+        thestats = gr.Markdown()
+        radio.change(fn=make_graph_flex, inputs=[radio, startdatebox, enddatebox], outputs=[theplot, thestats])
+        update_button.click(fn=make_graph_flex, inputs=[radio, startdatebox, enddatebox], outputs=[theplot, thestats])
+        iface.launch()
+
+if __name__ == "__main__":
+    main()

@@ -1,3 +1,9 @@
+---
+title: index
+app_file: working_copy_current.py
+sdk: gradio
+sdk_version: 4.26.0
+---
 <<<<<<< HEAD
 # cryptoind
 index for crypto assets

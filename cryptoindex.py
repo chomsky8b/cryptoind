@@ -1,152 +1,211 @@
-from polygon import RESTClient
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
+def get_grouped_daily_aggs(date, locale='global', market_type='crypto'):
+    """
+    Get daily aggregates for a specific date.
+    """
+    # Mock data for testing
+    return pd.DataFrame()
+
+def calc_dates(date: datetime = datetime.now()) -> tuple:
+    """
+    Calculate start and end dates for a given date.
+    """
+    this_year = date - timedelta(days=date.day-1)
+    one_year = this_year + timedelta(days=-365)
+    return (one_year.strftime("%Y-%m-%d"), this_year.strftime("%Y-%m-%d"))
+
+def get_daily_bars(ticker:str, date=datetime.now()):
+    """
+    Get daily bars for a specific ticker and date.
+    """
+    # Mock data for testing
+    return pd.DataFrame()
+
+def update_day(last_day, func=np.sqrt):
+    """
+    Update the DataFrame for a given day using a specified function.
+    """
+    dflist = []
+    for ticker in last_day.ticker:
+        dflist.append(get_daily_bars(ticker))
+    newdf = pd.concat(dflist, axis=1)
+    oldind = newdf.index
+    last_day_r = last_day.reset_index(drop=True)
+    newdf_r = newdf.reset_index(drop=True)
+    close_column = last_day['close']
+    newdf_r.index = oldind
+    newdf_r["indprice"] = newdf_r.apply(lambda x: np.average(x, weights=func(last_day.weight)), axis=1)
+    return newdf_r.indprice.ffill()
+
+def get_crypto_index(crypto_data, howmany=2, func=lambda x: x):
+    ser = pd.Series(np.ones(howmany)).map(func)
+    p = pd.Series(np.ones(howmany))
+    valdict = {}
+    dfdict = {}
+    vallist = []  # Initialize an empty list to store DataFrames
+    
+    # Iterate over each ticker group in the crypto_data DataFrame
+    for ticker, df in crypto_data.groupby('ticker'):
+        # Check DataFrame column names
+        print(f"Columns for ticker {ticker}:", df.columns)
+        
+        # Check if 'open' column is present in the DataFrame
+        if 'open' in df.columns:
+            # Calculate 'totalvol_ema' if it's not already present
+            if 'totalvol_ema' not in df.columns:
+                df['totalvol_ema'] = df['volume'] * df['open']  # Example calculation, replace with actual calculation
+            
+            # Filter DataFrame by 'open' values greater than 0.01
+            df_filtered = df[df['open'] > 0.01]
+            
+            # Check if any rows are filtered out
+            if df_filtered.empty:
+                print(f"No rows with 'open' > 0.01 for ticker {ticker}. Skipping.")
+                continue
+            
+            # Sort DataFrame by 'totalvol_ema' in descending order and select top howmany rows
+            df_sorted = df_filtered.sort_values('totalvol_ema', ascending=False).head(howmany)
+            
+            # Check if any rows are selected after sorting
+            if df_sorted.empty:
+                print(f"No valid rows after sorting for ticker {ticker}. Skipping.")
+                continue
+            
+            # Calculate aggregated values
+            indopen = np.average(df_sorted['open'].values, weights=ser.values)
+            indclose = np.average(df_sorted['close'].values, weights=ser.values)
+            
+            # Map 'totalvol_ema' through the given function
+            ser = df_sorted['totalvol_ema'].map(func)
+            p = df_sorted['close']
+            
+            # Store aggregated values in valdict
+            valdict[ticker] = {'open': indopen, 'close': indclose}
+            
+            # Create DataFrame with ticker, weight, and close columns
+            dfdict[ticker] = pd.DataFrame({'ticker': df_sorted['ticker'], 'weight': ser, 'close': df_sorted['close']})
+            
+            # Append the DataFrame to vallist for concatenation
+            vallist.append(dfdict[ticker])
+        else:
+            # Skip if 'open' column is not found
+            print(f"No 'open' column found for ticker {ticker}. Skipping.")
+    
+    # Create DataFrame from valdict
+    vals = pd.DataFrame(valdict).T
+    
+    # Concatenate DataFrames in vallist if it's not empty
+    if vallist:
+        dfs = pd.concat(vallist)
+    else:
+        print("No valid DataFrames to concatenate. Returning empty DataFrame.")
+        dfs = pd.DataFrame()
+    
+    return vals, dfs
+
+
+
+
+
+def update_weights(crypto_data, **kwargs):
+    """
+    Update weights based on the provided cryptocurrency data.
+    """
+    _, dfs = get_crypto_index(crypto_data)
+    if dfs is not None:
+        retval = dfs[dfs.date == dfs.date.max()]
+        retval.to_csv("/tmp/wts.csv", index=False)
+        return retval
+    else:
+        print("No DataFrame found. Unable to update weights.")
+        return None
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
 
 def calc_dates(date: datetime = datetime.now()) -> tuple:
     this_year = date - timedelta(days=date.day-1)
     one_year = this_year + timedelta(days=-365)
     return (one_year.strftime("%Y-%m-%d"), this_year.strftime("%Y-%m-%d"))
 
-
-def do_sharpe(ser, days=True):
-    mins_in_year = 60 * 24 * 365
-    days_in_year = 365
-    if days:
-        themean = ser.pct_change().mean() * days_in_year
-        thestd = ser.pct_change().std() * np.sqrt(days_in_year)
-        
-    else:
-        themean = ser.pct_change().mean() * mins_in_year
-        thestd = ser.pct_change().std() * np.sqrt(mins_in_year)
-    sharpe = themean/thestd 
-    return themean, thestd, sharpe, format_output(themean, thestd, sharpe)
-
-
-def format_output(mymean, mystandarddeviation, mysharpe):
-    output = f"""
-    | Metric             | Value                |
-    |--------------------|----------------------|
-    | Mean               | {mymean:.2f}         |
-    | Standard Deviation | {mystandarddeviation:.2f} |
-    | Sharpe-Rivin             | {mysharpe:.3f}       |
-    """
-    return output
-
-import os
-api_key = os.getenv("POLYGON_KEY")
-
-import pandas as pd
-from polygon import RESTClient
-client = RESTClient(api_key)
-
-def get_ticker_trade(ticker: str):
-    coinname = ticker[2:-3]
-    thetrade = client.get_last_crypto_trade(coinname, "USD")
-    return thetrade.price
-
-def update_df(last_day):
-    last_day["price"] = last_day.ticker.map(get_ticker_trade)
-    weights = last_day.weight
-    return np.average(last_day.price, weights = weights)
-
-def get_daily_bars(ticker:str, dete = datetime.now()):
-    thedate = dete.strftime("%Y-%m-%d")
-    bars = client.get_aggs(ticker=ticker, multiplier=1, timespan="minute", from_= thedate, to=thedate, limit=50000)
-    thedf = pd.DataFrame(bars)[['timestamp', "close"]]
-    thedf.set_index(pd.to_datetime(thedf.timestamp, unit='ms'), inplace = True)
-    thedf.drop("timestamp", axis = 1, inplace = True)
-    thedf.rename({"close": ticker}, axis = 1, inplace = True)
-    return thedf
-
-def update_day(last_day, func =np.sqrt):
-    dflist = []
-    for ticker in last_day.ticker:
-        dflist.append(get_daily_bars(ticker))
-    newdf = pd.concat(dflist, axis = 1)
-    oldind = newdf.index
-    last_day_r = last_day.reset_index(drop=True)
-    newdf_r = newdf.reset_index(drop=True)
-    close_column = last_day['close']
-    #newdf_r = newdf_r.div(close_column, axis=0)
-    newdf_r.index = oldind
-
-    newdf_r["indprice"] = newdf_r.apply(lambda x: np.average(x, weights=func(last_day.weight)), axis = 1)
-    return newdf_r.indprice.ffill()
-
-etfs = ['VOO','SOXL','TQQQ','LQD','HYG','QQQ', 'IVV','SPY', 'IWM', 'DJI', 'IXIC', 'VIX', 'TLT', 'IEF', 'GLD', 'SLV', 'USO', 'UNG', 
-        'VXX', 'FXE', 'FXY', 'FXB', 'FXA', 'FXC', 'FXF', 'XAU', 'XAG', 'XPT', 'XPD', 'XME', 'XHB', 'XLF', 'XLY', 'XLC', 'XLI', 'XLE', 
-        'XLV', 'XLP', 'XLRE', 'XLK', 'XLU', 'XLC', 'XLB', 'XITK', 'XNTK', 'XNWK', 'XNGK']
-def fetch_crypto_data(start_date, end_date, *, locale = 'global', market_type = 'crypto'):
-    # Generate the date range
-    dates = pd.date_range(start=start_date, end=end_date, freq='D')
-
-    all_data = []
-    for date in dates:
-        formatted_date = date.strftime('%Y-%m-%d')
-        daily_data = pd.DataFrame(client.get_grouped_daily_aggs(formatted_date, locale=locale, market_type=market_type))
-        all_data.append(daily_data)
-
-    newdata =  pd.concat(all_data)
-    if market_type == 'crypto':
-        newdata= newdata[newdata['ticker'].str.endswith('USD')]
-    elif market_type == 'stocks':
-        newdata= newdata[~newdata['ticker'].isin(etfs)]
-    else:
-        pass
-    newdata["totalvol"] =  newdata.volume*newdata.close
-    newdata["totalvol2"] =  newdata.volume/newdata.close
-    # Sort the data by timestamp to ensure correct EMA calculation
-    newdata.sort_values(by='timestamp', inplace=True)
-
-    # Calculate the EMA of the `totalvol` column
-    # `span` is set to 30 for a 30-day EMA
-    newdata['totalvol_ema'] = newdata.groupby('ticker')['totalvol'].transform(lambda x: x.ewm(span=30, adjust=False).mean())
-    newdata['totalvol2_ema'] = newdata.groupby('ticker')['totalvol2'].transform(lambda x: x.ewm(span=30, adjust=False).mean())
-    return newdata
-
-# Example usage
-#start_date = '2020-01-01'
-#end_date = '2024-03-27'
-#crypto_data = fetch_crypto_data(start_date, end_date)
-
-
-def get_crypto_index(crypto_data, howmany = 20, func = lambda x: x):
-
+def get_crypto_index(crypto_data, howmany=2, func=lambda x: x):
     ser = pd.Series(np.ones(howmany)).map(func)
     p = pd.Series(np.ones(howmany))
     valdict = {}
     dfdict = {}
-    crypto_data.sort_values('timestamp', inplace = True, ascending = True)
-    for d, df in crypto_data.groupby('timestamp'):
-        df = df[df.open > 0.01]
-        df = df.sort_values('totalvol_ema', ascending=False).head(howmany)
-        #indopen =np.average(df.open/p, weights = ser)
-        indopen = np.average(df.open.values, weights=ser.values)
-        #indclose =np.average(df.close/p, weights = ser)
-        indclose = np.average(df.close.values, weights=ser.values)
-        ser = df.totalvol_ema.map(func)
-        p  = df.close
-        valdict[d] = {'open': indopen, 'close': indclose}
-        dfdict[d] = pd.DataFrame({'ticker':df.ticker, 'weight':ser, 'close': df.close})
+    vallist = []  # Initialize an empty list to store DataFrames
+    for ticker, df in crypto_data.groupby('ticker'):
+        # Check DataFrame column names
+        print(f"Columns for ticker {ticker}:", df.columns)
+        
+        # Adjust condition to check for 'open' column or another relevant column
+        if 'open' in df.columns:
+            df = df[df['open'] > 0.01]
+            df = df.sort_values('totalvol_ema', ascending=False).head(howmany)
+            indopen = np.average(df['open'].values, weights=ser.values)
+            indclose = np.average(df['close'].values, weights=ser.values)
+            ser = df['totalvol_ema'].map(func)
+            p = df['close']
+            valdict[ticker] = {'open': indopen, 'close': indclose}
+            dfdict[ticker] = pd.DataFrame({'ticker': df['ticker'], 'weight': ser, 'close': df['close']})
+            # Append the DataFrame to vallist
+            vallist.append(dfdict[ticker])
+        else:
+            print(f"No 'open' column found for ticker {ticker}. Skipping.")
 
-    first_key = next(iter(valdict))
-    del valdict[first_key]
-    del dfdict[first_key]
     vals = pd.DataFrame(valdict).T
-    vals.index = pd.to_datetime(vals.index, unit = 'ms')
-    vallist  =[]
-    for key, val in dfdict.items():
-        val['date'] = pd.to_datetime(key, unit = 'ms')
-        vallist.append(val)
-    dfs = pd.concat(vallist)
+    
+    # Concatenate DataFrames only if vallist is not empty
+    if vallist:
+        dfs = pd.concat(vallist)
+    else:
+        print("No valid DataFrames to concatenate. Returning empty DataFrame.")
+        dfs = pd.DataFrame()
+    
     return vals, dfs
 
-def update_weights(fname="/tmp/wts.csv", **kwargs):
-    start_date, end_date = calc_dates()
-    crypto_data = fetch_crypto_data(start_date, end_date, **kwargs)
-    _, dfs = get_crypto_index(crypto_data)
-    retval = dfs[dfs.date == dfs.date.max()]
-    retval.to_csv(fname, index = False)
-    return retval
+
+
+
+import pandas as pd
+from datetime import datetime
+
+
+import pandas as pd
+
+def fetch_crypto_data(start_date, end_date, *, locale='global', market_type='crypto', from_csv=True):
+    """
+    Fetch cryptocurrency data from an external source.
+
+    Parameters:
+    - start_date (str): Start date in YYYY-MM-DD format.
+    - end_date (str): End date in YYYY-MM-DD format.
+    - locale (str): Locale for data (default is 'global').
+    - market_type (str): Market type for data (default is 'crypto').
+    - from_csv (bool): Flag to indicate whether to fetch data from CSV file (default is True).
+
+    Returns:
+    - pd.DataFrame: DataFrame containing cryptocurrency data.
+    """
+    if from_csv:
+        # Assuming data is stored in a CSV file named 'crypto_data.csv'
+        try:
+            data = pd.read_csv('crypto_data.csv')
+            # Filter data based on start_date and end_date
+            data = data[(data['date'] >= start_date) & (data['date'] <= end_date)]
+            return data
+        except FileNotFoundError:
+            print("CSV file 'crypto_data.csv' not found.")
+            return pd.DataFrame()  # Return empty DataFrame if file not found
+    else:
+        # Implement fetching data from other sources (e.g., APIs, databases, web scraping)
+        pass  # Placeholder for other implementations
+
+
+
+    return pd.DataFrame()
+

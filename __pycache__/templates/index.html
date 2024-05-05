@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cryptocurrency Index</title>
+    <!-- Add any additional CSS or stylesheets here -->
+</head>
+<body>
+    <h1>Cryptocurrency Index</h1>
+    <form method="POST">
+        <label for="start_date">Start Date:</label>
+        <input type="text" id="start_date" name="start_date" value="{{ start_date_default }}" required>
+        <br>
+        <label for="end_date">End Date:</label>
+        <input type="text" id="end_date" name="end_date" value="{{ end_date_default }}" required>
+        <br>
+        <input type="submit" value="Generate Index">
+    </form>
+    <br>
+    <!-- Display the Plotly graph here -->
+    {% if plot %}
+        {{ plot | safe }}
+    {% endif %}
+    <!-- Add any additional HTML content or scripts here -->
+</body>
+</html>

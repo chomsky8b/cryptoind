@@ -16,7 +16,13 @@ t = 0
 real_time_data = None
 is_historical = False
 
-update_weights1()
+start_date = "2023-01-01"  # Replace with your desired start date
+end_date = "2023-12-31"  # Replace with your desired end date
+crypto_data = fetch_crypto_data(start_date, end_date)
+update_weights(crypto_data)
+
+
+
 
 """ def mytimer(interval=60):
     while True:
@@ -47,7 +53,7 @@ def plot_index_prices(start_date, end_date, **kwargs):
 def realtime_update_weighted_prices(fname="/tmp/wts.csv"):
     if should_update_weights():
         # If it's time to update the weights, spawn a thread to do so
-        threading.Thread(target=update_weights1, daemon=True).start()
+        threading.Thread(target=update_weights, daemon=True).start()
     last_day = pd.read_csv(fname, parse_dates=["date"])
     prices = update_day(last_day)
     _, _, _, output = do_sharpe(prices, days = False)
@@ -71,7 +77,7 @@ if __name__ == "__main__":
     parser.add_argument("--share", action = "store_true", help="share the interface")
     args = parser.parse_args()
     make_graph_flex = partial(make_graph, fname = args.data_file, locale = args.locale, market_type = args.market_type)
-    update_weights1(fname=args.data_file, locale = args.locale, market_type = args.market_type)
+    update_weights(fname=args.data_file, locale = args.locale, market_type = args.market_type)
     with gr.Blocks() as iface:  # Use () for context manager
     
         
