@@ -20,6 +20,9 @@ def download_spy_data(source):
         # Download data from Historical Option Data
         spy_data = yf.download(spy_ticker, start=start_date, end=end_date, progress=False)
 
+    # Round data to 2 decimal places
+    spy_data = spy_data.round(2)
+
     # Save data to a CSV file
     spy_data.to_csv(f"SPY_data_source_{source}.csv")
     print(f"SPY data from source {source} saved to SPY_data_source_{source}.csv")
