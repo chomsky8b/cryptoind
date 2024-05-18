@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 client = RESTClient("ELKyuDIy2c3CSW3eHCnuFhkq2yFmgMoE")  # POLYGON_API_KEY environment variable is used
 
 # Option contracts
-contracts = ["O:SPY240524C00515000"] # Add more contracts as needed
+contracts = ["O:SPY240524C00510000"] # Add more contracts as needed
 
 for contract in contracts:
     # Extract the expiration date from the contract name

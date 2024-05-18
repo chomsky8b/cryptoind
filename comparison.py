@@ -217,3 +217,5 @@ if __name__ == "__main__":
         update_button.click(fn=make_graph_flex, inputs=[startdatebox, enddatebox], outputs=[index_plot, index_cumulative_plot, bitcoin_cumulative_plot])
 
         iface.launch(share=True)
+
+
